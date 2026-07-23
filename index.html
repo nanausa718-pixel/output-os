@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#E9E9E5">
+<title>Output OS</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23E9E9E5'/%3E%3Crect x='30' y='42' width='120' height='96' fill='%23fff' stroke='%23D5D5D0' stroke-width='3'/%3E%3Cline x1='30' y1='72' x2='150' y2='72' stroke='%23D5D5D0' stroke-width='3'/%3E%3Cline x1='30' y1='105' x2='150' y2='105' stroke='%23D5D5D0' stroke-width='3'/%3E%3Cline x1='72' y1='42' x2='72' y2='138' stroke='%23D5D5D0' stroke-width='3'/%3E%3C/svg%3E">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #E9E9E5; }
+  * { box-sizing: border-box; }
+  button { font-family: inherit; border: none; background: none; padding: 0; cursor: pointer; color: inherit; }
+  select { cursor: pointer; }
+
+  .flex { display: flex; }
+  .items-center { align-items: center; }
+  .items-start { align-items: flex-start; }
+  .items-end { align-items: flex-end; }
+  .justify-between { justify-content: space-between; }
+  .justify-center { justify-content: center; }
+  .flex-wrap { flex-wrap: wrap; }
+  .flex-1 { flex: 1 1 0%; }
+  .w-full { width: 100%; }
+  .relative { position: relative; }
+  .fixed { position: fixed; }
+  .bottom-0 { bottom: 0; }
+  .left-0 { left: 0; }
+  .right-0 { right: 0; }
+  .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+  .z-50 { z-index: 50; }
+  .min-h-screen { min-height: 100vh; }
+  .max-w-2xl { max-width: 42rem; }
+  .mx-auto { margin-left: auto; margin-right: auto; }
+  .gap-1 { gap: 4px; }
+  .gap-1\.5 { gap: 6px; }
+  .gap-2 { gap: 8px; }
+  .gap-2\.5 { gap: 10px; }
+  .gap-3 { gap: 12px; }
+  .space-y-2 > * + * { margin-top: 8px; }
+  .space-y-3 > * + * { margin-top: 12px; }
+  .space-y-4 > * + * { margin-top: 16px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* ---- localStorage shim (same shape the app expects) ---- */
+window.storage = {
+  async get(key) {
+    try { const v = localStorage.getItem(key); return v === null ? null : { key, value: v }; }
+    catch (e) { return null; }
+  },
+  async set(key, value) {
+    try { localStorage.setItem(key, value); return { key, value }; }
+    catch (e) { return null; }
+  },
+};
+
+/* ---- icons ---- */
+function Svg({ size = 14, color = 'currentColor', style, children }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0, ...style }}>
+      {children}
+    </svg>
+  );
+}
+const Plus = (p) => <Svg {...p}><path d="M12 5v14" /><path d="M5 12h14" /></Svg>;
+const X = (p) => <Svg {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Svg>;
+const ChevronDown = (p) => <Svg {...p}><path d="m6 9 6 6 6-6" /></Svg>;
+const ChevronRight = (p) => <Svg {...p}><path d="m9 18 6-6-6-6" /></Svg>;
+
+
+const KEY = 'output-os-table-v2';
+
+const P = {
+  canvas: '#E9E9E5', sheet: '#FFFFFF', grid: '#D5D5D0', head: '#F5F5F2',
+  ink: '#1A1A1A', sub: '#7C7C78', faint: '#AEAEA9', accent: '#2E5D7D',
+  lock: '#FAFAF9',
+};
+const UI = "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif";
+
+const MARKS = [
+  { k: 'o', sym: '○', label: 'できた' },
+  { k: 'd', sym: '△', label: '半分' },
+  { k: 'x', sym: '✕', label: 'できなかった' },
+];
+
+const DEFAULT = {
+  themes: [
+    { id: 'th1', name: '建築', outputs: [{ id: 'o1', text: 'スケッチ5分' }, { id: 'o2', text: '建物を1つ観察' }] },
+    { id: 'th2', name: 'ピアノ', outputs: [{ id: 'o3', text: '左手だけ5分' }] },
+    { id: 'th3', name: '英語', outputs: [{ id: 'o4', text: '10分だけ読む' }] },
+  ],
+  days: {},
+  inbox: [],
+  base: [],
+};
+
+function pad(n) { return String(n).padStart(2, '0'); }
+function dstr(d) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function today() { return dstr(new Date()); }
+function tomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return dstr(d); }
+function parse(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
+function fmt(s) {
+  const d = parse(s);
+  const w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  return `${d.getMonth() + 1}月${d.getDate()}日（${w}）`;
+}
+function short(s) { const d = parse(s); return `${d.getMonth() + 1}/${d.getDate()}`; }
+const uid = (p) => `${p}-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
+
+function Grow({ value, onChange, placeholder, style, readOnly }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.height = 'auto';
+    ref.current.style.height = `${Math.max(ref.current.scrollHeight, 20)}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref} value={value || ''} readOnly={readOnly}
+      onChange={(e) => onChange && onChange(e.target.value)}
+      placeholder={placeholder} rows={1}
+      style={{
+        width: '100%', border: 'none', outline: 'none', resize: 'none', background: 'transparent',
+        fontFamily: UI, fontSize: 13.5, lineHeight: 1.65, color: P.ink, overflow: 'hidden', padding: 0, display: 'block', ...style,
+      }}
+    />
+  );
+}
+
+function Sheet({ children, style, className }) {
+  return (
+    <div className={className} style={{ background: P.sheet, border: `1px solid ${P.grid}`, boxShadow: '0 1px 3px rgba(0,0,0,.05)', ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function Head({ cols }) {
+  return (
+    <div style={{ display: 'flex', background: P.head, borderBottom: `1px solid ${P.grid}`, fontSize: 11, color: P.sub }}>
+      {cols.map((c, i) => (
+        <div key={i} style={{ width: c.w, flex: c.w ? undefined : 1, flexShrink: c.w ? 0 : undefined, padding: '8px 10px', borderRight: i === cols.length - 1 ? 'none' : `1px solid ${P.grid}` }}>
+          {c.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TableOS2() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('today');
+  const [picking, setPicking] = useState(null);
+  const [freeRow, setFreeRow] = useState(false);
+  const [freeText, setFreeText] = useState('');
+  const [freeTheme, setFreeTheme] = useState('');
+  const [inboxDraft, setInboxDraft] = useState('');
+  const [newOutput, setNewOutput] = useState({});
+  const [openDay, setOpenDay] = useState(null);
+  const timer = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(KEY, false);
+        if (r && r.value) setData({ ...DEFAULT, ...JSON.parse(r.value) });
+        else { setData(DEFAULT); await window.storage.set(KEY, JSON.stringify(DEFAULT), false); }
+      } catch (e) { setData(DEFAULT); } finally { setLoading(false); }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (loading || !data) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { window.storage.set(KEY, JSON.stringify(data), false).catch(() => {}); }, 400);
+    return () => clearTimeout(timer.current);
+  }, [data, loading]);
+
+  if (loading || !data) return <div className="min-h-screen" style={{ background: P.canvas }} />;
+
+  const T = today(), TM = tomorrow();
+  const rowsOf = (d) => data.days[d] || [];
+  const theme = (id) => data.themes.find((t) => t.id === id);
+
+  const setRows = (d, fn) => setData((p) => ({ ...p, days: { ...p.days, [d]: fn(p.days[d] || []) } }));
+
+  const addRow = (d, themeId, text) => {
+    if (!text.trim()) return;
+    setRows(d, (rs) => [...rs, { id: uid('row'), themeId: themeId || null, text: text.trim(), mark: null, comment: '', createdOn: T }]);
+  };
+  const delRow = (d, id) => setRows(d, (rs) => rs.filter((r) => r.id !== id));
+  const patchRow = (d, id, patch) => setRows(d, (rs) => rs.map((r) => r.id === id ? { ...r, ...patch } : r));
+
+  const addTheme = () => setData((p) => ({ ...p, themes: [...p.themes, { id: uid('th'), name: '', outputs: [] }] }));
+  const setThemeName = (id, v) => setData((p) => ({ ...p, themes: p.themes.map((t) => t.id === id ? { ...t, name: v } : t) }));
+  const delTheme = (id) => setData((p) => ({ ...p, themes: p.themes.filter((t) => t.id !== id) }));
+  const addOutput = (tid, text) => {
+    if (!text.trim()) return;
+    setData((p) => ({ ...p, themes: p.themes.map((t) => t.id === tid ? { ...t, outputs: [...t.outputs, { id: uid('o'), text: text.trim() }] } : t) }));
+  };
+  const setOutput = (tid, oid, v) => setData((p) => ({
+    ...p, themes: p.themes.map((t) => t.id === tid ? { ...t, outputs: t.outputs.map((o) => o.id === oid ? { ...o, text: v } : o) } : t),
+  }));
+  const delOutput = (tid, oid) => setData((p) => ({
+    ...p, themes: p.themes.map((t) => t.id === tid ? { ...t, outputs: t.outputs.filter((o) => o.id !== oid) } : t),
+  }));
+
+  const addInbox = (t) => { if (t.trim()) setData((p) => ({ ...p, inbox: [{ id: uid('i'), text: t.trim(), date: T }, ...p.inbox] })); };
+  const delInbox = (id) => setData((p) => ({ ...p, inbox: p.inbox.filter((i) => i.id !== id) }));
+  const inboxToTomorrow = (item, themeId) => { addRow(TM, themeId, item.text); delInbox(item.id); setTab('tomorrow'); };
+  const inboxToOutput = (item, tid) => { addOutput(tid, item.text); delInbox(item.id); };
+
+  const addBase = (text, themeId) => setData((p) => ({ ...p, base: [{ id: uid('b'), text, themeId, since: T }, ...p.base] }));
+  const delBase = (id) => setData((p) => ({ ...p, base: p.base.filter((b) => b.id !== id) }));
+
+  const exportData = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `output-os-${T}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!parsed || typeof parsed !== 'object') throw new Error('bad');
+        setData({ ...DEFAULT, ...parsed });
+      } catch (err) {
+        alert('読み込めなかった。書き出したJSONファイルを選んで。');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const pastDays = Object.keys(data.days).filter((d) => d < T && rowsOf(d).length).sort().reverse();
+
+  return (
+    <div className="min-h-screen" style={{ background: P.canvas, color: P.ink, fontFamily: UI }}>
+      <style>{`
+        * { -webkit-tap-highlight-color: transparent; }
+        textarea::placeholder, input::placeholder { color: ${P.faint}; }
+        .fi { animation: fi .26s ease both; }
+        @keyframes fi { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+        @media (prefers-reduced-motion: reduce){ .fi{animation:none} }
+      `}</style>
+
+      <div className="max-w-2xl mx-auto" style={{ paddingBottom: 96 }}>
+
+        {/* ================= 今日 ================= */}
+        {tab === 'today' && (() => {
+          const rows = rowsOf(T);
+          return (
+            <div className="fi" style={{ padding: '34px 14px 0' }}>
+              <div style={{ padding: '0 4px 14px' }}>
+                <h1 style={{ fontSize: 17, fontWeight: 600 }}>今日</h1>
+                <p style={{ fontSize: 11.5, color: P.sub, marginTop: 5 }}>{fmt(T)}・文字は昨日のまま。結果だけ書き足せる。</p>
+              </div>
+
+              {rows.length === 0 ? (
+                <Sheet style={{ padding: 18 }}>
+                  <p style={{ fontSize: 13, color: P.sub, lineHeight: 1.9 }}>
+                    今日の表はまだ空。<br />いまから作ってもいいし、明日の表から始めてもいい。
+                  </p>
+                  <div className="flex gap-2" style={{ marginTop: 12 }}>
+                    <button onClick={() => setPicking({ day: T })}
+                      style={{ fontSize: 12.5, padding: '8px 13px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.accent }}>
+                      今日の表を作る
+                    </button>
+                    <button onClick={() => setTab('tomorrow')}
+                      style={{ fontSize: 12.5, padding: '8px 13px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.sub }}>
+                      明日の表へ
+                    </button>
+                  </div>
+                </Sheet>
+              ) : (
+                <Sheet>
+                  <Head cols={[{ label: 'テーマ', w: 72 }, { label: '出力', w: 132 }, { label: '結果' }]} />
+                  {rows.map((r, i) => {
+                    const th = r.themeId ? theme(r.themeId) : null;
+                    const editable = r.createdOn === T;
+                    return (
+                      <div key={r.id} style={{ display: 'flex', borderBottom: i === rows.length - 1 ? 'none' : `1px solid ${P.grid}` }}>
+                        <div style={{ width: 72, flexShrink: 0, padding: '11px 10px', borderRight: `1px solid ${P.grid}`, background: editable ? P.sheet : P.lock, fontSize: 12, color: P.sub }}>
+                          {th ? th.name : ''}
+                        </div>
+                        <div style={{ width: 132, flexShrink: 0, padding: '11px 10px', borderRight: `1px solid ${P.grid}`, background: editable ? P.sheet : P.lock }}>
+                          {editable ? (
+                            <Grow value={r.text} onChange={(v) => patchRow(T, r.id, { text: v })} />
+                          ) : (
+                            <p style={{ fontSize: 13.5, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{r.text}</p>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, padding: '10px 10px' }}>
+                          <div className="flex gap-1" style={{ marginBottom: 6 }}>
+                            {MARKS.map((m) => (
+                              <button key={m.k}
+                                onClick={() => patchRow(T, r.id, { mark: r.mark === m.k ? null : m.k })}
+                                style={{
+                                  width: 30, height: 26, fontSize: 13, borderRadius: 3,
+                                  border: `1px solid ${r.mark === m.k ? P.accent : P.grid}`,
+                                  background: r.mark === m.k ? P.accent : P.sheet,
+                                  color: r.mark === m.k ? '#fff' : P.sub,
+                                }}
+                              >{m.sym}</button>
+                            ))}
+                            <button onClick={() => delRow(T, r.id)} style={{ marginLeft: 'auto', paddingRight: 2 }}>
+                              <X size={11} color={P.faint} />
+                            </button>
+                          </div>
+                          <Grow
+                            value={r.comment}
+                            onChange={(v) => patchRow(T, r.id, { comment: v })}
+                            placeholder={r.mark === 'x' ? 'できなかった理由は' : r.mark === 'd' ? 'どこまでやれた' : '気づいたこと'}
+                            style={{ fontSize: 13 }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Sheet>
+              )}
+
+              {rows.length > 0 && (
+                <button onClick={() => setPicking({ day: T })} className="flex items-center gap-1.5"
+                  style={{ fontSize: 12.5, color: P.sub, marginTop: 10, padding: 4 }}>
+                  <Plus size={13} /> 行を足す
+                </button>
+              )}
+
+              <button onClick={() => setTab('tomorrow')} className="w-full flex items-center justify-between"
+                style={{ marginTop: 26, background: P.sheet, border: `1px solid ${P.grid}`, padding: '14px 16px' }}>
+                <span style={{ fontSize: 13 }}>明日の表をつくる</span>
+                <ChevronRight size={15} color={P.faint} />
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* ================= 明日 ================= */}
+        {tab === 'tomorrow' && (() => {
+          const rows = rowsOf(TM);
+          const todayRows = rowsOf(T);
+          return (
+            <div className="fi" style={{ padding: '34px 14px 0' }}>
+              <div style={{ padding: '0 4px 14px' }}>
+                <h1 style={{ fontSize: 17, fontWeight: 600 }}>明日</h1>
+                <p style={{ fontSize: 11.5, color: P.sub, marginTop: 5 }}>{fmt(TM)}・ここで書いた文字は、明日には固定される。</p>
+              </div>
+
+              {todayRows.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <p style={{ fontSize: 11.5, color: P.sub, marginBottom: 7, paddingLeft: 4 }}>今日はこうだった</p>
+                  <Sheet>
+                    {todayRows.map((r, i) => {
+                      const m = MARKS.find((x) => x.k === r.mark);
+                      const th = r.themeId ? theme(r.themeId) : null;
+                      return (
+                        <div key={r.id} style={{ padding: '10px 12px', borderTop: i === 0 ? 'none' : `1px solid ${P.grid}`, background: P.lock }}
+                          className="flex items-start gap-2.5">
+                          <span style={{ fontSize: 13, color: m ? P.ink : P.faint, width: 14, flexShrink: 0, paddingTop: 1 }}>
+                            {m ? m.sym : '―'}
+                          </span>
+                          <div style={{ flex: 1 }}>
+                            <p style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+                              {th ? <span style={{ color: P.sub }}>{th.name}｜</span> : null}{r.text}
+                            </p>
+                            {r.comment && <p style={{ fontSize: 12, color: P.sub, lineHeight: 1.6, marginTop: 3 }}>{r.comment}</p>}
+                          </div>
+                          <button onClick={() => addRow(TM, r.themeId, r.text)}
+                            style={{ fontSize: 11, color: P.accent, flexShrink: 0, paddingTop: 2 }}>明日へ</button>
+                        </div>
+                      );
+                    })}
+                  </Sheet>
+                </div>
+              )}
+
+              {rows.length > 0 && (
+                <Sheet>
+                  <Head cols={[{ label: 'テーマ', w: 72 }, { label: '出力' }]} />
+                  {rows.map((r, i) => {
+                    const th = r.themeId ? theme(r.themeId) : null;
+                    return (
+                      <div key={r.id} style={{ display: 'flex', borderBottom: i === rows.length - 1 ? 'none' : `1px solid ${P.grid}` }}>
+                        <div style={{ width: 72, flexShrink: 0, padding: '11px 10px', borderRight: `1px solid ${P.grid}`, fontSize: 12, color: P.sub }}>
+                          {th ? th.name : ''}
+                        </div>
+                        <div style={{ flex: 1, padding: '11px 10px' }} className="flex items-start gap-2">
+                          <Grow value={r.text} onChange={(v) => patchRow(TM, r.id, { text: v })} />
+                          <button onClick={() => delRow(TM, r.id)} style={{ flexShrink: 0, paddingTop: 3 }}>
+                            <X size={11} color={P.faint} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Sheet>
+              )}
+
+              <div className="flex gap-2" style={{ marginTop: 10 }}>
+                <button onClick={() => setPicking({ day: TM })} className="flex items-center gap-1.5"
+                  style={{ fontSize: 12.5, color: P.accent, padding: 4 }}>
+                  <Plus size={13} /> 出力一覧から選ぶ
+                </button>
+                <button onClick={() => { setFreeRow(true); setPicking(null); }} className="flex items-center gap-1.5"
+                  style={{ fontSize: 12.5, color: P.sub, padding: 4 }}>
+                  <Plus size={13} /> 自分で書く
+                </button>
+              </div>
+
+              {freeRow && (
+                <Sheet style={{ padding: 12, marginTop: 8 }} className="fi">
+                  <div style={{ position: 'relative', display: 'inline-block', marginBottom: 8 }}>
+                    <select value={freeTheme} onChange={(e) => setFreeTheme(e.target.value)}
+                      style={{ appearance: 'none', fontFamily: UI, fontSize: 12, padding: '5px 22px 5px 9px', border: `1px solid ${P.grid}`, background: P.sheet, color: freeTheme ? P.ink : P.faint, outline: 'none', borderRadius: 3 }}>
+                      <option value="">テーマなし</option>
+                      {data.themes.filter((t) => t.name.trim()).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <ChevronDown size={11} color={P.faint} style={{ position: 'absolute', right: 7, top: 8, pointerEvents: 'none' }} />
+                  </div>
+                  <Grow value={freeText} onChange={setFreeText} placeholder="明日やること" style={{ fontSize: 14 }} />
+                  <div className="flex gap-2" style={{ marginTop: 10 }}>
+                    <button onClick={() => { addRow(TM, freeTheme || null, freeText); setFreeText(''); setFreeRow(false); }}
+                      style={{ flex: 1, padding: 9, background: P.accent, color: '#fff', fontSize: 12.5, borderRadius: 3 }}>足す</button>
+                    <button onClick={() => { setFreeText(''); setFreeRow(false); }}
+                      style={{ padding: '9px 14px', fontSize: 12.5, color: P.sub }}>やめる</button>
+                  </div>
+                </Sheet>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ================= 出力一覧 ================= */}
+        {tab === 'list' && (
+          <div className="fi" style={{ padding: '34px 14px 0' }}>
+            <div style={{ padding: '0 4px 14px' }}>
+              <h1 style={{ fontSize: 17, fontWeight: 600 }}>出力一覧</h1>
+              <p style={{ fontSize: 11.5, color: P.sub, marginTop: 5 }}>育てたいものと、その出力の仕方。表を作るときはここから選ぶ。</p>
+            </div>
+
+            <div className="space-y-3">
+              {data.themes.map((t) => (
+                <Sheet key={t.id}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: P.head, borderBottom: `1px solid ${P.grid}`, padding: '8px 10px' }}>
+                    <input value={t.name} onChange={(e) => setThemeName(t.id, e.target.value)} placeholder="育てたいもの"
+                      style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: UI, fontSize: 13, fontWeight: 600 }} />
+                    <button onClick={() => delTheme(t.id)}><X size={12} color={P.faint} /></button>
+                  </div>
+                  {t.outputs.map((o) => (
+                    <div key={o.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderBottom: `1px solid ${P.grid}` }}>
+                      <Grow value={o.text} onChange={(v) => setOutput(t.id, o.id, v)} />
+                      <button onClick={() => delOutput(t.id, o.id)} style={{ flexShrink: 0, paddingTop: 3 }}><X size={11} color={P.faint} /></button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, padding: '9px 12px' }}>
+                    <input
+                      value={newOutput[t.id] || ''}
+                      onChange={(e) => setNewOutput({ ...newOutput, [t.id]: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { addOutput(t.id, newOutput[t.id] || ''); setNewOutput({ ...newOutput, [t.id]: '' }); } }}
+                      placeholder="出力の仕方を足す"
+                      style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: UI, fontSize: 13 }} />
+                    <button onClick={() => { addOutput(t.id, newOutput[t.id] || ''); setNewOutput({ ...newOutput, [t.id]: '' }); }}>
+                      <Plus size={13} color={P.faint} />
+                    </button>
+                  </div>
+                </Sheet>
+              ))}
+            </div>
+
+            <button onClick={addTheme} className="flex items-center gap-1.5" style={{ fontSize: 12.5, color: P.sub, marginTop: 10, padding: 4 }}>
+              <Plus size={13} /> 育てたいものを足す
+            </button>
+
+            <div style={{ marginTop: 32 }}>
+              <p style={{ fontSize: 11.5, color: P.sub, marginBottom: 7, paddingLeft: 4 }}>Base・もう考えなくていいもの</p>
+              {data.base.length === 0 ? (
+                <p style={{ fontSize: 12.5, color: P.faint, padding: 4, lineHeight: 1.9 }}>
+                  記録の行から送れる。送ったものは表に出さなくていい。
+                </p>
+              ) : (
+                <Sheet>
+                  {data.base.map((b, i) => (
+                    <div key={b.id} style={{ padding: '11px 12px', borderTop: i === 0 ? 'none' : `1px solid ${P.grid}` }}
+                      className="flex items-start justify-between gap-3">
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 13, color: P.sub, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{b.text}</p>
+                        <p style={{ fontSize: 11, color: P.faint, marginTop: 3 }}>{short(b.since)}から</p>
+                      </div>
+                      <button onClick={() => delBase(b.id)} style={{ flexShrink: 0, paddingTop: 2 }}><X size={11} color={P.faint} /></button>
+                    </div>
+                  ))}
+                </Sheet>
+              )}
+            </div>
+
+            <div style={{ marginTop: 32 }}>
+              <p style={{ fontSize: 11.5, color: P.sub, marginBottom: 7, paddingLeft: 4 }}>データ</p>
+              <Sheet style={{ padding: 12 }}>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={exportData}
+                    style={{ fontSize: 12, padding: '7px 12px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.accent }}>
+                    書き出す
+                  </button>
+                  <label style={{ fontSize: 12, padding: '7px 12px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.sub, cursor: 'pointer' }}>
+                    読み込む
+                    <input type="file" accept="application/json,.json" onChange={importData} style={{ display: 'none' }} />
+                  </label>
+                </div>
+                <p style={{ fontSize: 11, color: P.faint, marginTop: 9, lineHeight: 1.75 }}>
+                  この端末のブラウザに保存されている。書き出しておけば別の端末に移せる。
+                </p>
+              </Sheet>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 記録 ================= */}
+        {tab === 'log' && (
+          <div className="fi" style={{ padding: '34px 14px 0' }}>
+            <div style={{ padding: '0 4px 14px' }}>
+              <h1 style={{ fontSize: 17, fontWeight: 600 }}>記録</h1>
+              <p style={{ fontSize: 11.5, color: P.sub, marginTop: 5 }}>過ぎた日の表。書いたものは残る。</p>
+            </div>
+
+            {pastDays.length === 0 ? (
+              <p style={{ fontSize: 12.5, color: P.faint, padding: 4, lineHeight: 1.9 }}>まだ過去の表はない。</p>
+            ) : (
+              <div className="space-y-2">
+                {pastDays.map((d) => {
+                  const rows = rowsOf(d);
+                  const open = openDay === d;
+                  return (
+                    <Sheet key={d}>
+                      <button onClick={() => setOpenDay(open ? null : d)} className="w-full flex items-center justify-between"
+                        style={{ padding: '11px 12px', background: P.head }}>
+                        <span style={{ fontSize: 12.5 }}>{fmt(d)}</span>
+                        <span className="flex items-center gap-2">
+                          <span style={{ fontSize: 12, color: P.sub, letterSpacing: '.1em' }}>
+                            {rows.map((r) => { const m = MARKS.find((x) => x.k === r.mark); return m ? m.sym : '・'; }).join('')}
+                          </span>
+                          <ChevronDown size={13} color={P.faint} style={{ transform: open ? 'rotate(180deg)' : 'none' }} />
+                        </span>
+                      </button>
+                      {open && rows.map((r, i) => {
+                        const m = MARKS.find((x) => x.k === r.mark);
+                        const th = r.themeId ? theme(r.themeId) : null;
+                        return (
+                          <div key={r.id} style={{ padding: '11px 12px', borderTop: `1px solid ${P.grid}` }} className="flex items-start gap-2.5">
+                            <span style={{ fontSize: 13, width: 14, flexShrink: 0, color: m ? P.ink : P.faint, paddingTop: 1 }}>{m ? m.sym : '―'}</span>
+                            <div style={{ flex: 1 }}>
+                              <p style={{ fontSize: 13, lineHeight: 1.65 }}>
+                                {th ? <span style={{ color: P.sub }}>{th.name}｜</span> : null}{r.text}
+                              </p>
+                              {r.comment && <p style={{ fontSize: 12.5, color: P.sub, lineHeight: 1.65, marginTop: 3 }}>{r.comment}</p>}
+                            </div>
+                            {r.comment && (
+                              <button onClick={() => addBase(r.comment, r.themeId)} style={{ fontSize: 11, color: P.accent, flexShrink: 0, paddingTop: 2 }}>
+                                Baseへ
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </Sheet>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= Inbox ================= */}
+        {tab === 'inbox' && (
+          <div className="fi" style={{ padding: '34px 14px 0' }}>
+            <div style={{ padding: '0 4px 14px' }}>
+              <h1 style={{ fontSize: 17, fontWeight: 600 }}>Inbox</h1>
+              <p style={{ fontSize: 11.5, color: P.sub, marginTop: 5 }}>思いついた順に。空にしなくていい。</p>
+            </div>
+
+            <Sheet style={{ padding: 12, marginBottom: 16 }}>
+              <Grow value={inboxDraft} onChange={setInboxDraft} placeholder="長さは気にしない" style={{ fontSize: 14, lineHeight: 1.7 }} />
+              {inboxDraft.trim() && (
+                <button onClick={() => { addInbox(inboxDraft); setInboxDraft(''); }} className="fi"
+                  style={{ marginTop: 10, width: '100%', padding: 9, background: P.accent, color: '#fff', fontSize: 12.5, borderRadius: 3 }}>
+                  入れておく
+                </button>
+              )}
+            </Sheet>
+
+            {data.inbox.length === 0 ? (
+              <p style={{ fontSize: 12.5, color: P.faint, padding: 4, lineHeight: 1.9 }}>いまは空。</p>
+            ) : (
+              <Sheet>
+                {data.inbox.map((i, idx) => (
+                  <div key={i.id} style={{ borderTop: idx === 0 ? 'none' : `1px solid ${P.grid}`, padding: '12px 14px' }}>
+                    <p style={{ fontSize: 13.5, lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>{i.text}</p>
+                    <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 9 }}>
+                      <span style={{ fontSize: 11, color: P.faint, marginRight: 2 }}>{short(i.date)}</span>
+                      {data.themes.filter((t) => t.name.trim()).map((t) => (
+                        <button key={t.id} onClick={() => inboxToOutput(i, t.id)}
+                          style={{ fontSize: 11, padding: '4px 8px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.sub }}>
+                          {t.name}の出力へ
+                        </button>
+                      ))}
+                      <button onClick={() => inboxToTomorrow(i, null)}
+                        style={{ fontSize: 11, padding: '4px 8px', border: `1px solid ${P.grid}`, borderRadius: 3, color: P.accent }}>
+                        明日の表へ
+                      </button>
+                      <button onClick={() => delInbox(i.id)} style={{ fontSize: 11, color: P.faint }}>捨てる</button>
+                    </div>
+                  </div>
+                ))}
+              </Sheet>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ================= 出力ピッカー ================= */}
+      {picking && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,.25)' }} onClick={() => setPicking(null)}>
+          <div className="max-w-2xl w-full fi" style={{ background: P.sheet, padding: '20px 16px 34px', maxHeight: '82vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}>
+            <p style={{ fontSize: 12.5, color: P.sub, marginBottom: 14 }}>
+              {picking.day === T ? '今日' : '明日'}の表に足す出力を選ぶ
+            </p>
+            <div className="space-y-4">
+              {data.themes.filter((t) => t.name.trim()).map((t) => (
+                <div key={t.id}>
+                  <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 7 }}>{t.name}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {t.outputs.length === 0 && <span style={{ fontSize: 11.5, color: P.faint }}>出力がまだない</span>}
+                    {t.outputs.map((o) => (
+                      <button key={o.id} onClick={() => addRow(picking.day, t.id, o.text)}
+                        style={{ fontSize: 12.5, padding: '8px 12px', border: `1px solid ${P.grid}`, borderRadius: 3, background: P.sheet }}>
+                        {o.text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setPicking(null)} className="w-full"
+              style={{ marginTop: 20, padding: 12, background: P.canvas, fontSize: 13, borderRadius: 3 }}>閉じる</button>
+          </div>
+        </div>
+      )}
+
+      {/* ================= tabs ================= */}
+      <div className="fixed bottom-0 left-0 right-0" style={{ background: 'rgba(233,233,229,.94)', backdropFilter: 'blur(16px)', borderTop: `1px solid ${P.grid}` }}>
+        <div className="max-w-2xl mx-auto flex" style={{ padding: '12px 0 24px' }}>
+          {[['today', '今日'], ['tomorrow', '明日'], ['list', '一覧'], ['log', '記録'], ['inbox', 'Inbox']].map(([k, label]) => (
+            <button key={k} onClick={() => { setTab(k); setPicking(null); setFreeRow(false); }} className="flex-1 relative"
+              style={{ fontSize: 12, color: tab === k ? P.ink : P.faint, fontWeight: tab === k ? 600 : 400 }}>
+              {label}
+              {k === 'inbox' && data.inbox.length > 0 && (
+                <span style={{ position: 'absolute', top: -3, right: 12, width: 5, height: 5, borderRadius: 99, background: P.accent }} />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<TableOS2 />);
+</script>
+</body>
+</html>
